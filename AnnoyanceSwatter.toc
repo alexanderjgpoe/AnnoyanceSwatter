@@ -1,9 +1,11 @@
-## Interface: 110205
+## Interface: 120001
 ## Title: AnnoyanceSwatter
 ## Notes: Tracks and auto-removes annoying effects in party/raid.
 ## Author: Xerun
-## Version: 0.01a
+## Version: 0.03a
 ## OptionalDeps: Ace3
+## SavedVariables: AnnoyanceSwatterDB
+
 
 
 Libs\LibStub\LibStub.lua
