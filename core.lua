@@ -16,24 +16,27 @@ local AceDB = LibStub("AceDB-3.0")
 local defaults = {
     profile = {
         trackedSpells = {
-            { keyword = "Mohawk", name = "Mohawk Grenade", autoRemove = true },
-            { keyword = "Levitate", name = "Levitate", autoRemove = true },
-            { keyword = "Wisp", name = "Wisp Costume", autoRemove = false },
-            { keyword = "Spider", name = "Spider Costume", autoRemove = false },
-            { keyword = "Ghoul", name = "Ghoul Costume", autoRemove = false },
-            { keyword = "Jack", name = "Jack-o'-Lanterned!", autoRemove = false },
-            { keyword = "Leper", name = "Leper Gnome Costume", autoRemove = false },
-            { keyword = "Skeleton", name = "Skeleton Costume", autoRemove = false },
-            { keyword = "Pirate", name = "Pirate Costume", autoRemove = false },
-            { keyword = "Ninja", name = "Ninja Costume", autoRemove = false },
-            { keyword = "Ghost", name = "Ghost Costume", autoRemove = false },
-            { keyword = "Bat", name = "Bat Costume", autoRemove = false },
-            { keyword = "Vampire", name = "Vampire Costume", autoRemove = false },
-            { keyword = "Nerubian", name = "Nerubian Costume", autoRemove = false },
-            { keyword = "Slime", name = "Slime Costume", autoRemove = false },
-        },
-        autoRaidKick = false,
-        autoGuildKick = false,
+            { keyword = "Mohawk", name = "Mohawk Grenade", enabled = true  },
+            { keyword = "Mohawked", name = "Mohawk Grenade", enabled = true  },
+            { keyword = "Mohawked!", name = "Mohawk Grenade", enabled = true },
+            { keyword = "Levitate", name = "Levitate", enabled = true  },
+            { keyword = "Wisp", name = "Wisp Costume", enabled = true  },
+            { keyword = "Spider", name = "Spider Costume", enabled = true  },
+            { keyword = "Ghoul", name = "Ghoul Costume", enabled = true  },
+            { keyword = "Jack", name = "Jack-o'-Lanterned!", enabled = true  },
+            { keyword = "Leper", name = "Leper Gnome Costume", enabled = true  },
+            { keyword = "Skeleton", name = "Skeleton Costume", enabled = true  },
+            { keyword = "Pirate", name = "Pirate Costume", enabled = true  },
+            { keyword = "Ninja", name = "Ninja Costume", enabled = true  },
+            { keyword = "Ghost", name = "Ghost Costume", enabled = true  },
+            { keyword = "Bat", name = "Bat Costume", enabled = true  },
+            { keyword = "Vampire", name = "Vampire Costume", enabled = true  },
+            { keyword = "Nerubian", name = "Nerubian Costume", enabled = true  },
+            { keyword = "Slime", name = "Slime Costume", enabled = true  },
+            { keyword = "Turkey", name = "Turkey Feathers", enabled = true  },
+            { keyword = "Slow Fall", name = "Slow Fall", enabled = true  },
+            { keyword = "Moonkin Feather", name = "Moonkin Statue", enabled = true  },
+        }
     }
 }
 
@@ -61,7 +64,6 @@ end
 -- =============================
 function AnnoyanceSwatter:OnEnable()
     self:RegisterEvent("COMBAT_LOG_EVENT_UNFILTERED")
-    self:RegisterEvent("CHAT_MSG_TEXT_EMOTE")
     --self:RegisterEvent("UNIT_AURA")
     print("|cff00ff00AnnoyanceSwatter enabled.|r Type /as or /annoyanceswatter for options.")
 end
@@ -72,8 +74,8 @@ end
 function AnnoyanceSwatter:HandleSlashCommand(input)
     input = input and input:trim():lower()
     if input == "config" or input == "" then
-        if Settings and Settings.OpenToCategory then
-            Settings.OpenToCategory("AnnoyanceSwatter")
+        if AceConfigDialog then
+            AceConfigDialog:Open("AnnoyanceSwatter")
         else
             print("AnnoyanceSwatter: Settings panel unavailable.")
         end
@@ -92,11 +94,18 @@ end
 -- Helper: Raid Warning
 -- =============================
 local function RaidWarn(msg)
-    if IsInRaid() and SendChatMessage then
-        SendChatMessage(msg, "RAID_WARNING")
+    if IsInRaid() then
+        if UnitIsGroupLeader("player") or UnitIsGroupAssistant("player") then
+            C_ChatInfo.SendChatMessage(msg, "RAID_WARNING")
+        else
+            C_ChatInfo.SendChatMessage(msg, "RAID")
+        end
+    elseif IsInGroup() then
+        C_ChatInfo.SendChatMessage(msg, "PARTY")
+    else
+        print(msg)
     end
 end
-
 -- =============================
 -- Cooldown Helper (0.5 sec throttle)
 -- =============================
@@ -118,16 +127,18 @@ local recentLogs = {}
 function AnnoyanceSwatter:COMBAT_LOG_EVENT_UNFILTERED()
     local _, eventType, _, sourceGUID, sourceName, _, _, destGUID, destName, _, _, spellID, spellName =
         CombatLogGetCurrentEventInfo()
+
     if not sourceName or not spellName then return end
 
-    -- Track both SPELL_CAST_SUCCESS and SPELL_AURA_APPLIED (since some only appear as auras)
+    -- Only care about successful casts or aura applications
     if eventType ~= "SPELL_CAST_SUCCESS" and eventType ~= "SPELL_AURA_APPLIED" then
         return
     end
 
     for _, entry in ipairs(self.db.profile.trackedSpells) do
-        if spellName:lower():find(entry.keyword:lower()) then
-            -- Only care about players in your group/raid
+        if entry.enabled and spellName:lower():find(entry.keyword:lower()) then
+
+            -- Only care about group members
             if not (UnitInParty(sourceName) or UnitInRaid(sourceName)) then
                 return
             end
@@ -135,37 +146,14 @@ function AnnoyanceSwatter:COMBAT_LOG_EVENT_UNFILTERED()
             local key = sourceName .. ":" .. entry.name
             local now = GetTime()
 
-            -- If this player/spell combo was seen recently, ignore
-            if recentLogs[key] and (now - recentLogs[key]) < 0.5 then
-                return
+            if not self.recentlyLogged[key] or (now - self.recentlyLogged[key]) > 0.5 then
+                self.recentlyLogged[key] = now
+
+                self:AddOffender(sourceName, entry.name)
+                RaidWarn(sourceName .. " used " .. entry.name)
             end
-            recentLogs[key] = now
 
-            -- Log offender
-            self:AddOffender(sourceName, entry.name)
-            RaidWarn(sourceName .. " used " .. entry.name)
-
-            -- Remove the buff from the player if needed
-            if entry.autoRemove and destName == UnitName("player") then
-                C_Timer.After(0.5, function()
-                    self:CancelBuffByID("player", spellID)
-                end)
-            end
-        end
-    end
-end
-
-
--- =============================
--- Emote Tracking
--- =============================
-function AnnoyanceSwatter:CHAT_MSG_TEXT_EMOTE(event, msg, playerName)
-    if not playerName then return end
-    local lowerMsg = msg:lower()
-    if lowerMsg:find("mohawk") or lowerMsg:find("grenade") then
-        if (UnitInRaid(playerName) or UnitInParty(playerName)) and CanLog(self, playerName) then
-            self:AddOffender(playerName, "Mohawk Grenade")
-            RaidWarn(playerName .. " used Mohawk Grenade")
+            break -- stop checking after match
         end
     end
 end
@@ -197,20 +185,6 @@ function AnnoyanceSwatter:UNIT_AURA(event, unit)
     end
 end
 ]]
--- =============================
--- Cancel Buff by Spell ID
--- =============================
-function AnnoyanceSwatter:CancelBuffByID(unit, spellID)
-    if not UnitBuff then return end
-    for i = 1, 40 do
-        local name, _, _, _, _, _, _, _, _, id = UnitBuff(unit, i)
-        if id == spellID then
-            CancelUnitBuff(unit, i)
-            print("|cff00ffffAnnoyanceSwatter:|r Removed " .. name)
-            break
-        end
-    end
-end
 
 -- =============================
 -- Add Offender
@@ -238,10 +212,13 @@ function AnnoyanceSwatter:SetupOptions()
         spellArgs["spell"..idx] = {
             type = "toggle",
             name = spellData.name,
-            desc = "Automatically remove " .. spellData.name .. " when applied to you.",
             order = order,
-            get = function() return self.db.profile.trackedSpells[idx].autoRemove end,
-            set = function(_, val) self.db.profile.trackedSpells[idx].autoRemove = val end,
+            get = function()
+                return self.db.profile.trackedSpells[idx].enabled
+            end,
+            set = function(_, val)
+                self.db.profile.trackedSpells[idx].enabled = val
+            end,
         }
         order = order + 1
     end
@@ -262,25 +239,9 @@ function AnnoyanceSwatter:SetupOptions()
                 order = 2,
                 args = spellArgs,
             },
-            autoRaidKick = {
-                type = "toggle",
-                name = "Enable Auto Raid Kick Button",
-                desc = "Show a button to automatically raid kick offenders.",
-                order = 3,
-                get = function() return self.db.profile.autoRaidKick end,
-                set = function(_, val) self.db.profile.autoRaidKick = val end,
-            },
-            autoGuildKick = {
-                type = "toggle",
-                name = "Enable Auto Guild Kick Button",
-                desc = "Show a button to automatically guild kick offenders.",
-                order = 4,
-                get = function() return self.db.profile.autoGuildKick end,
-                set = function(_, val) self.db.profile.autoGuildKick = val end,
-            },
         },
     }
 
     AceConfig:RegisterOptionsTable("AnnoyanceSwatter", options)
-    self.optionsFrame = AceConfigDialog:AddToBlizOptions("AnnoyanceSwatter", "AnnoyanceSwatter")
 end
+
